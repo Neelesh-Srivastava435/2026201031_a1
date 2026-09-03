@@ -46,7 +46,7 @@ CREATE TABLE vehicles (
 );
 
 -- 4. Trips Table
--- Stores ride bookings, fares, vehicle assignments, and real-time state.
+-- Stores ride bookings, fares, vehicle assignments, and real-time state
 CREATE TABLE trips (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     rider_id UUID NOT NULL REFERENCES riders(id) ON DELETE RESTRICT,
