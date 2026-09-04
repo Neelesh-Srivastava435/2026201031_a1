@@ -94,15 +94,24 @@ def seed_postgres():
         )
         conn.commit()
 
-        # 3. Seed Trips
+        # 3. Seed Trips (Ensuring at most 1 active trip per rider for idx_active_rider_trip)
         print(f"Seeding {TOTAL_TRIPS} trips...")
         trip_rows = []
+        active_riders = set()
+
         for _ in tqdm(range(TOTAL_TRIPS), desc="Trips"):
             t_id = str(uuid.uuid4())
             r_id = random.choice(rider_ids)
             v_id = random.choice(vehicle_ids)
             fare = round(random.uniform(8.0, 150.0), 2)
-            status = random.choice(TRIP_STATUSES)
+
+            # A rider can have at most ONE active trip ('REQUESTED' or 'IN_TRANSIT')
+            if r_id not in active_riders and random.random() < 0.05:
+                status = random.choice(["IN_TRANSIT", "REQUESTED"])
+                active_riders.add(r_id)
+            else:
+                status = random.choice(["COMPLETED", "COMPLETED", "COMPLETED", "CANCELLED"])
+
             created_at = fake.date_time_between(start_date="-90d", end_date="now")
             completed_at = created_at + timedelta(minutes=random.randint(10, 60)) if status == "COMPLETED" else None
 
