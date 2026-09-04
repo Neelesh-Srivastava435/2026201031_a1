@@ -105,8 +105,67 @@ def seed_mongodb():
     if reviews_batch:
         reviews_collection.insert_many(reviews_batch, ordered=False)
 
+    # Generate VehicleMetadata (linking to PostgreSQL vehicles if available)
+    print("Seeding VehicleMetadata...")
+    vm_collection = db["VehicleMetadata"]
+    
+    # Try fetching real vehicle IDs from Postgres
+    vehicles_info = []
+    try:
+        import psycopg2
+        pg_conn = psycopg2.connect(
+            host=os.getenv("POSTGRES_HOST", "localhost"),
+            port=os.getenv("POSTGRES_PORT", "5432"),
+            dbname=os.getenv("POSTGRES_DB", "ridesync_db"),
+            user=os.getenv("POSTGRES_USER", "postgres"),
+            password=os.getenv("POSTGRES_PASSWORD", "postgres")
+        )
+        cur = pg_conn.cursor()
+        cur.execute("SELECT id, license_plate, class FROM vehicles;")
+        vehicles_info = cur.fetchall()
+        pg_conn.close()
+    except Exception as e:
+        print(f"Could not connect to Postgres for vehicle IDs ({e}), generating mock IDs...")
+
+    if not vehicles_info:
+        classes = ["Standard", "Comfort", "XL", "Executive", "Black"]
+        vehicles_info = [(str(uuid.uuid4()), f"{fake.state_abbr()}-{random.randint(1000, 9999)}-{fake.lexify('??').upper()}", random.choice(classes)) for _ in range(2500)]
+
+    vm_batch = []
+    for v_id, plate, v_class in tqdm(vehicles_info, desc="Vehicle Metadata"):
+        num_inspections = random.randint(1, 3)
+        inspections = []
+        for _ in range(num_inspections):
+            inspections.append({
+                "inspection_id": str(uuid.uuid4()),
+                "date": fake.date_time_between(start_date="-1y", end_date="now"),
+                "passed": random.random() > 0.05,
+                "inspector": f"Station #{random.randint(10, 99)} - {fake.name()}",
+                "notes": fake.sentence()
+            })
+
+        doc = {
+            "vehicle_id": str(v_id),
+            "license_plate": plate,
+            "class": v_class,
+            "inspection_records": inspections,
+            "features": {
+                "has_child_seat": random.random() > 0.5,
+                "wheelchair_accessible": random.random() > 0.7,
+                "pet_friendly": random.random() > 0.6,
+                "dashcam_enabled": random.random() > 0.3
+            },
+            "updated_at": datetime.utcnow()
+        }
+        vm_batch.append(doc)
+
+    if vm_batch:
+        vm_collection.delete_many({})
+        vm_collection.insert_many(vm_batch, ordered=False)
+
     print("MongoDB seeding completed successfully!")
 
 
 if __name__ == "__main__":
     seed_mongodb()
+
