@@ -1,0 +1,63 @@
+================================================================================
+RideSync - PostgreSQL Performance Benchmarks & EXPLAIN (ANALYZE, BUFFERS)
+================================================================================
+
+--------------------------------------------------------------------------------
+1. Workflow 1 & Partial Unique Index (idx_active_rider_trip) Verification
+--------------------------------------------------------------------------------
+Query:
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT * FROM trips 
+WHERE rider_id = '00000000-0000-0000-0000-000000000001' 
+  AND status IN ('REQUESTED', 'IN_TRANSIT');
+
+Plan Output:
+[To be captured from local PostgreSQL test run]
+
+--------------------------------------------------------------------------------
+2. Workflow 2: Window Analytics (7-Day Moving Avg & Dense Rank)
+--------------------------------------------------------------------------------
+Query:
+EXPLAIN (ANALYZE, BUFFERS)
+WITH daily_vehicle_revenue AS (
+    SELECT 
+        v.id AS vehicle_id,
+        v.license_plate,
+        v.class,
+        DATE_TRUNC('day', t.created_at)::DATE AS trip_date,
+        COUNT(t.id) AS daily_trips,
+        SUM(t.fare_amount) AS daily_fare_revenue
+    FROM vehicles v
+    JOIN trips t ON v.id = t.vehicle_id
+    WHERE t.status = 'COMPLETED'
+    GROUP BY v.id, v.license_plate, v.class, DATE_TRUNC('day', t.created_at)::DATE
+),
+moving_average_calc AS (
+    SELECT 
+        vehicle_id,
+        license_plate,
+        class,
+        trip_date,
+        daily_fare_revenue,
+        ROUND(
+            AVG(daily_fare_revenue) OVER (
+                PARTITION BY vehicle_id 
+                ORDER BY trip_date 
+                ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+            ), 2
+        ) AS seven_day_moving_avg_revenue
+    FROM daily_vehicle_revenue
+)
+SELECT 
+    trip_date,
+    vehicle_id,
+    license_plate,
+    class,
+    daily_fare_revenue,
+    seven_day_moving_avg_revenue,
+    DENSE_RANK() OVER (PARTITION BY trip_date ORDER BY seven_day_moving_avg_revenue DESC) AS daily_performance_rank
+FROM moving_average_calc
+ORDER BY trip_date DESC, daily_performance_rank ASC;
+
+Plan Output:
+[To be captured from local PostgreSQL test run]

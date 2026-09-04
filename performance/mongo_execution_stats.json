@@ -1,0 +1,14 @@
+{
+  "project": "RideSync",
+  "database": "MongoDB",
+  "workflows": {
+    "workflow3_geoNear": {
+      "description": "executionStats for $geoNear nearest available vehicle query",
+      "stats": {}
+    },
+    "workflow4_facet": {
+      "description": "executionStats for $facet multi-faceted review analytics",
+      "stats": {}
+    }
+  }
+}
