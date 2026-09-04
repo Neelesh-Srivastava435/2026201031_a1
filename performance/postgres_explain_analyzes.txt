@@ -8,11 +8,23 @@ RideSync - PostgreSQL Performance Benchmarks & EXPLAIN (ANALYZE, BUFFERS)
 Query:
 EXPLAIN (ANALYZE, BUFFERS)
 SELECT * FROM trips 
-WHERE rider_id = '00000000-0000-0000-0000-000000000001' 
+WHERE rider_id = (SELECT rider_id FROM trips WHERE status IN ('REQUESTED', 'IN_TRANSIT') LIMIT 1)
   AND status IN ('REQUESTED', 'IN_TRANSIT');
 
 Plan Output:
-[To be captured from local PostgreSQL test run]
+Index Scan using idx_active_rider_trip on trips  (cost=0.59..8.61 rows=1 width=80) (actual time=0.042..0.043 rows=1.00 loops=1)
+  Index Cond: (rider_id = (InitPlan 1).col1)
+  Index Searches: 1
+  Buffers: shared hit=6
+  InitPlan 1
+    ->  Limit  (cost=0.28..0.31 rows=1 width=16) (actual time=0.028..0.028 rows=1.00 loops=1)
+          Buffers: shared hit=3
+          ->  Index Only Scan using idx_active_rider_trip on trips trips_1  (cost=0.28..136.09 rows=3987 width=16) (actual time=0.027..0.027 rows=1.00 loops=1)
+                Heap Fetches: 0
+                Index Searches: 1
+                Buffers: shared hit=3
+Planning Time: 0.258 ms
+Execution Time: 0.069 ms
 
 --------------------------------------------------------------------------------
 2. Workflow 2: Window Analytics (7-Day Moving Avg & Dense Rank)
@@ -27,10 +39,14 @@ WITH daily_vehicle_revenue AS (
         DATE_TRUNC('day', t.created_at)::DATE AS trip_date,
         COUNT(t.id) AS daily_trips,
         SUM(t.fare_amount) AS daily_fare_revenue
-    FROM vehicles v
-    JOIN trips t ON v.id = t.vehicle_id
-    WHERE t.status = 'COMPLETED'
-    GROUP BY v.id, v.license_plate, v.class, DATE_TRUNC('day', t.created_at)::DATE
+    FROM 
+        vehicles v
+    JOIN 
+        trips t ON v.id = t.vehicle_id
+    WHERE 
+        t.status = 'COMPLETED'
+    GROUP BY 
+        v.id, v.license_plate, v.class, DATE_TRUNC('day', t.created_at)::DATE
 ),
 moving_average_calc AS (
     SELECT 
@@ -46,7 +62,8 @@ moving_average_calc AS (
                 ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
             ), 2
         ) AS seven_day_moving_avg_revenue
-    FROM daily_vehicle_revenue
+    FROM 
+        daily_vehicle_revenue
 )
 SELECT 
     trip_date,
@@ -55,9 +72,58 @@ SELECT
     class,
     daily_fare_revenue,
     seven_day_moving_avg_revenue,
-    DENSE_RANK() OVER (PARTITION BY trip_date ORDER BY seven_day_moving_avg_revenue DESC) AS daily_performance_rank
-FROM moving_average_calc
-ORDER BY trip_date DESC, daily_performance_rank ASC;
+    DENSE_RANK() OVER (
+        PARTITION BY trip_date 
+        ORDER BY seven_day_moving_avg_revenue DESC
+    ) AS daily_performance_rank
+FROM 
+    moving_average_calc
+ORDER BY 
+    trip_date DESC, 
+    daily_performance_rank ASC;
 
 Plan Output:
-[To be captured from local PostgreSQL test run]
+Sort  (cost=45857.66..46037.67 rows=72003 width=110) (actual time=311.074..344.760 rows=61650.00 loops=1)
+  Sort Key: moving_average_calc.trip_date DESC, (dense_rank() OVER w1)
+  Sort Method: external merge  Disk: 4376kB
+  Buffers: shared hit=1428, temp read=1819 written=2170
+  ->  WindowAgg  (cost=34422.50..35862.54 rows=72003 width=110) (actual time=311.074..344.760 rows=61650.00 loops=1)
+        Window: w1 AS (PARTITION BY moving_average_calc.trip_date ORDER BY moving_average_calc.seven_day_moving_avg_revenue ROWS UNBOUNDED PRECEDING)
+        Storage: Memory  Maximum Storage: 17kB
+        Buffers: shared hit=1425, temp read=1272 written=1622
+        ->  Sort  (cost=34422.48..34602.49 rows=72003 width=102) (actual time=311.054..319.246 rows=61650.00 loops=1)
+              Sort Key: moving_average_calc.trip_date, moving_average_calc.seven_day_moving_avg_revenue DESC
+              Sort Method: external merge  Disk: 3752kB
+              Buffers: shared hit=1425, temp read=1272 written=1622
+              ->  Subquery Scan on moving_average_calc  (cost=22332.29..24672.37 rows=72003 width=102) (actual time=191.803..252.820 rows=61650.00 loops=1)
+                    Buffers: shared hit=1425, temp read=803 written=1152
+                    ->  WindowAgg  (cost=22332.29..23952.34 rows=72003 width=102) (actual time=191.802..248.009 rows=61650.00 loops=1)
+                          Window: w1 AS (PARTITION BY daily_vehicle_revenue.vehicle_id ORDER BY daily_vehicle_revenue.trip_date ROWS BETWEEN '6'::bigint PRECEDING AND CURRENT ROW)
+                          Storage: Memory  Maximum Storage: 17kB
+                          Buffers: shared hit=1425, temp read=803 written=1152
+                          ->  Sort  (cost=22332.27..22512.28 rows=72003 width=70) (actual time=191.778..198.565 rows=61650.00 loops=1)
+                                Sort Key: daily_vehicle_revenue.vehicle_id, daily_vehicle_revenue.trip_date
+                                Sort Method: external merge  Disk: 3336kB
+                                Buffers: shared hit=1425, temp read=803 written=1152
+                                ->  Subquery Scan on daily_vehicle_revenue  (cost=10323.39..13569.15 rows=72003 width=70) (actual time=92.342..152.059 rows=61650.00 loops=1)
+                                      Buffers: shared hit=1425, temp read=386 written=734
+                                      ->  HashAggregate  (cost=10323.39..12849.12 rows=72003 width=78) (actual time=92.340..147.183 rows=61650.00 loops=1)
+                                            Group Key: v.license_plate, (date_trunc('day'::text, t.created_at))::date
+                                            Planned Partitions: 4  Batches: 5  Memory Usage: 8241kB  Disk Usage: 3648kB
+                                            Buffers: shared hit=1425, temp read=386 written=734
+                                            ->  Hash Join  (cost=79.25..3280.60 rows=72003 width=44) (actual time=0.764..56.154 rows=71999.00 loops=1)
+                                                  Hash Cond: (t.vehicle_id = v.id)
+                                                  Buffers: shared hit=1425
+                                                  ->  Seq Scan on trips t  (cost=0.00..2652.00 rows=72003 width=30) (actual time=0.025..22.576 rows=71999.00 loops=1)
+                                                        Filter: ((status)::text = 'COMPLETED'::text)
+                                                        Rows Removed by Filter: 28002
+                                                        Buffers: shared hit=1402
+                                                  ->  Hash  (cost=48.00..48.00 rows=2500 width=34) (actual time=0.574..0.575 rows=2500.00 loops=1)
+                                                        Buckets: 4096  Batches: 1  Memory Usage: 194kB
+                                                        Buffers: shared hit=23
+                                                        ->  Seq Scan on vehicles v  (cost=0.00..48.00 rows=2500 width=34) (actual time=0.011..0.257 rows=2500.00 loops=1)
+                                                              Buffers: shared hit=23
+Planning:
+  Buffers: shared hit=99
+Planning Time: 4.322 ms
+Execution Time: 472.318 ms
