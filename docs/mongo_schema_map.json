@@ -1,0 +1,151 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RideSync MongoDB Document Schemas",
+  "description": "Schema definitions and validation rules for RideSync MongoDB collections",
+  "database": "ridesync_db",
+  "collections": {
+    "VehicleMetadata": {
+      "description": "Stores flexible inspection history, maintenance records, and dynamic vehicle features.",
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": ["vehicle_id", "license_plate", "class", "inspection_records", "features", "updated_at"],
+          "properties": {
+            "vehicle_id": {
+              "bsonType": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+              "description": "Foreign key reference to PostgreSQL vehicles.id (UUID)"
+            },
+            "license_plate": {
+              "bsonType": "string",
+              "description": "Vehicle registration plate"
+            },
+            "class": {
+              "enum": ["Standard", "Comfort", "XL", "Executive", "Black"],
+              "description": "Ride tier classification"
+            },
+            "inspection_records": {
+              "bsonType": "array",
+              "items": {
+                "bsonType": "object",
+                "required": ["inspection_id", "date", "passed", "inspector"],
+                "properties": {
+                  "inspection_id": { "bsonType": "string" },
+                  "date": { "bsonType": "date" },
+                  "passed": { "bsonType": "bool" },
+                  "inspector": { "bsonType": "string" },
+                  "notes": { "bsonType": "string" }
+                }
+              }
+            },
+            "features": {
+              "bsonType": "object",
+              "properties": {
+                "has_child_seat": { "bsonType": "bool" },
+                "wheelchair_accessible": { "bsonType": "bool" },
+                "pet_friendly": { "bsonType": "bool" },
+                "dashcam_enabled": { "bsonType": "bool" }
+              }
+            },
+            "updated_at": { "bsonType": "date" }
+          }
+        }
+      },
+      "indexes": [
+        { "key": { "vehicle_id": 1 }, "unique": true }
+      ]
+    },
+    "TripReviews": {
+      "description": "Stores rider-submitted post-trip reviews, star ratings, and categorized feedback tags.",
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": ["review_id", "trip_id", "rider_id", "vehicle_id", "rating", "feedback_tags", "created_at"],
+          "properties": {
+            "review_id": {
+              "bsonType": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "trip_id": {
+              "bsonType": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+              "description": "Reference to PostgreSQL trips.id"
+            },
+            "rider_id": {
+              "bsonType": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "vehicle_id": {
+              "bsonType": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "rating": {
+              "bsonType": "int",
+              "minimum": 1,
+              "maximum": 5,
+              "description": "Star rating from 1 to 5"
+            },
+            "feedback_tags": {
+              "bsonType": "array",
+              "items": { "bsonType": "string" },
+              "description": "Tags like 'Clean Car', 'Smooth Drive', 'Great Conversation', 'Late Arrival'"
+            },
+            "comment": { "bsonType": "string" },
+            "created_at": { "bsonType": "date" }
+          }
+        }
+      },
+      "indexes": [
+        { "key": { "trip_id": 1 }, "unique": true },
+        { "key": { "vehicle_id": 1 } },
+        { "key": { "rating": 1 } },
+        { "key": { "created_at": -1 } }
+      ]
+    },
+    "TelemetryPings": {
+      "description": "Real-time geospatial location logs streaming from active vehicles.",
+      "validator": {
+        "$jsonSchema": {
+          "bsonType": "object",
+          "required": ["ping_id", "vehicle_id", "is_available", "location", "created_at"],
+          "properties": {
+            "ping_id": {
+              "bsonType": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "vehicle_id": {
+              "bsonType": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            },
+            "is_available": {
+              "bsonType": "bool",
+              "description": "Flag indicating if vehicle is currently open for new dispatches"
+            },
+            "speed_kmh": { "bsonType": "double" },
+            "heading_degrees": { "bsonType": "double" },
+            "location": {
+              "bsonType": "object",
+              "required": ["type", "coordinates"],
+              "properties": {
+                "type": { "enum": ["Point"] },
+                "coordinates": {
+                  "bsonType": "array",
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "items": { "bsonType": "double" },
+                  "description": "[longitude, latitude] in GeoJSON format"
+                }
+              }
+            },
+            "created_at": { "bsonType": "date" }
+          }
+        }
+      },
+      "indexes": [
+        { "key": { "location": "2dsphere" }, "name": "idx_telemetry_2dsphere" },
+        { "key": { "created_at": 1 }, "expireAfterSeconds": 7200, "name": "idx_telemetry_ttl_2hr" },
+        { "key": { "vehicle_id": 1, "created_at": -1 }, "name": "idx_vehicle_telemetry_latest" }
+      ]
+    }
+  }
+}
